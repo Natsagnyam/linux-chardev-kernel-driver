@@ -1,0 +1,30 @@
+# ==========================================
+# Linux Kernel Module Build Artifacts
+# ==========================================
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+*.order
+*.symvers
+*.unsigned
+*.ssa
+.*.cmd
+.tmp_versions/
+Modules.symvers
+Module.symvers
+
+# ==========================================
+# Userspace Binaries & Test Applications
+# ==========================================
+app
+
+# ==========================================
+# IDEs & Operating System Files
+# ==========================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.Trash-1000/
