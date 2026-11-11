@@ -2,12 +2,12 @@
 
 A robust, production-grade Linux character device driver developed for ARM Cortex-A8 (BeagleBone Black) running Debian, designed from first principles for Canonical Linux Kernel Engineering standards.
 CLI terminal spin-lock-test result:
-![Result](jpeg/spin-lock.png)
+![Result](jpeg/test_ioctl_kernel-driver.png)
 
-![Result](jpeg/kernel_ring_buffer.png)
+![ioctl](jpeg/ioctl_kernel_driver.png)
 
 ---
-
+cat << 'EOF' > README.md
 # Linux Out-of-Tree Character Device Driver (`demodev`)
 
 A robust, production-grade Linux character device driver developed for ARM Cortex-A8 (BeagleBone Black) running Debian, designed from first principles for Canonical Linux Kernel Engineering standards.
@@ -19,6 +19,9 @@ A robust, production-grade Linux character device driver developed for ARM Corte
 - **Dynamic Device Registration:** Automatically allocates a major number via `register_chrdev()` and creates device nodes in `/dev/demodev` via modern kernel `class_create()` and `device_create()` APIs.
 - **Persistent Kernel Buffer:** Maintains a 1024-byte kernel storage buffer (`global_kernel_buf`) supporting cross-file descriptor interactions (e.g., separate `echo`/`tee` and `cat` invocations).
 - **SMP Concurrency Protection:** Employs kernel spinlocks (`spinlock_t`) to serialize critical sections and protect shared global states against multi-core SMP race conditions, while carefully separating sleeping context operations (such as userspace boundary copies) from locked regions.
+- **ioctl Command & Telemetry Interface:** Supports custom `ioctl` commands (`.unlocked_ioctl`) using magic number `'k'`:
+  - `DEMODEV_IOC_RESET`: Securely resets and zeroes out the kernel buffer.
+  - `DEMODEV_IOC_GET_STATS`: Queries real-time telemetry structure (`demodev_stats`) containing total write count, read count, and current buffer length.
 - **Safe Boundary Copying:** Implements secure kernel-to-userspace memory transfer using `copy_to_user()` and `copy_from_user()` with rigorous bounds checking and error handling (`-EFAULT`, `-ENOMEM`).
 - **Unified Build System:** A streamlined `Makefile` that compiles both the out-of-tree kernel module (`demodev.ko`) and companion userspace test applications (`app`).
 
@@ -28,12 +31,11 @@ A robust, production-grade Linux character device driver developed for ARM Corte
 
 ```text
 .
-├── demodev.c       # Core kernel module source (persistent character driver with spinlocks)
-├── app.c           # Userspace test application exercising open/write/read lifecycle
+├── demodev.c       # Core kernel module source (persistent character driver with spinlocks & ioctl)
+├── app.c           # Userspace test application exercising I/O and ioctl commands
 ├── Makefile        # Unified build infrastructure for kernel module and app binary
 ├── README.md       # Project documentation and build/test instructions
 └── jpeg/           # Architecture diagrams and hardware verification photos
-
 Build & Installation Instructions
 1. Compile the Module and Application
 Run make to compile both the kernel module and the userspace test program:
