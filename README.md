@@ -67,6 +67,9 @@ Using the Companion App:
 
 Bash
 sudo ./app
+
+sudo ./stress_app
+
 4. Unload the Module
 Remove the module when testing is complete:
 
