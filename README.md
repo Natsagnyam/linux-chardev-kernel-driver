@@ -1,48 +1,60 @@
-# Linux Character Device Driver (`linux-chardev-kernel-driver`)
+# Linux Out-of-Tree Character Device Driver (`demodev`)
 
-An out-of-tree Linux character device driver (`demodev`) built for the BeagleBone Black running Debian, demonstrating a static buffer character device lifecycle, `file_operations` handlers, and userspace integration.
+A robust, production-grade Linux character device driver developed for ARM Cortex-A8 (BeagleBone Black) running Debian, designed from first principles for Canonical Linux Kernel Engineering standards.
 
-## Architecture Overview
-- **Major Number Allocation:** Dynamically requests a major device number using `alloc_chrdev_region()`.
-- **Sysfs Integration:** Automatically creates the device node `/dev/demodev` via `class_create()` and `device_create()`.
-- **Static Storage:** Utilizes a static kernel buffer array to store and retrieve data written from userspace.
+---
 
-## Build Instructions
+## Architecture & Features
 
-1. Install matching kernel build headers:
-   ```bash
-   sudo apt update
-   sudo apt install build-essential linux-headers-$(uname -r)
-Compile the kernel module and userspace app:
+- **Dynamic Device Registration:** Automatically allocates a major number via `register_chrdev()` and creates device nodes in `/dev/demodev` via modern kernel `class_create()` and `device_create()` APIs.
+- **Persistent Kernel Buffer:** Maintains a thread-safe, 1024-byte kernel storage buffer (`global_kernel_buf`) supporting cross-file descriptor interactions (e.g., separate `echo`/`tee` and `cat` invocations).
+- **Safe Boundary Copying:** Implements secure kernel-to-userspace memory transfer using `copy_to_user()` and `copy_from_user()` with rigorous bounds checking and error handling (`-EFAULT`, `-ENOMEM`).
+- **Unified Build System:** A streamlined `Makefile` that compiles both the out-of-tree kernel module (`demodev.ko`) and companion userspace test applications (`app`).
+
+---
+
+## Repository Structure
+
+```text
+.
+├── demodev.c       # Core kernel module source (persistent character driver)
+├── app.c           # Userspace test application exercising open/write/read lifecycle
+├── Makefile        # Unified build infrastructure for kernel module and app binary
+├── README.md       # Project documentation and build/test instructions
+└── jpeg/           # Architecture diagrams and hardware verification photos
+Build & Installation Instructions
+1. Compile the Module and Application
+Run make to compile both the kernel module and the userspace test program:
 
 Bash
+make clean
 make
-gcc app.c -o app
-Testing & Usage Lifecycle
-Insert the Module:
+2. Load the Kernel Module
+Insert the compiled module into the running kernel and verify initialization:
 
 Bash
 sudo insmod demodev.ko
-Verify: Run 
-dmesg | tail -n 3
-to confirm initialization and check that /dev/demodev was created 
+dmesg | tail -n 5
 ls -l /dev/demodev
+3. Test I/O Operations
+You can test the driver using standard shell utilities or the companion test application:
 
-Test Write & Read (via CLI or App):
+Using Shell Utilities:
 
 Bash
-echo "Canonical Kernel Test" | sudo tee /dev/demodev
+echo "Canonical Linux Kernel Engineering" | sudo tee /dev/demodev
 sudo cat /dev/demodev
-
-Alternatively, run your compiled userspace application:
+Using the Companion App:
 
 Bash
 sudo ./app
-Result:
-![Result](jpeg/static-kernel-driver.png)
-
-Remove the Module:
+4. Unload the Module
+Remove the module when testing is complete:
 
 Bash
 sudo rmmod demodev
-Verify: Confirm /dev/demodev is automatically removed and check dmesg | tail -n 2 for the exit message.
+dmesg | tail -n 5
+Author
+Natsagnyam Namkhai
+
+Target Role: Linux Kernel Engineer, Canonical

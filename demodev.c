@@ -1,96 +1,141 @@
-#include <linux/init.h>
 #include <linux/module.h>
+#include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
-#include <linux/cdev.h>
+#include <linux/slab.h>
 #include <linux/device.h>
-#include <linux/string.h>
+#include <linux/types.h>
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Canonical Engineering Prep");
-MODULE_DESCRIPTION("Out-of-Tree Character Device Driver");
-MODULE_VERSION("0.1");
+MODULE_AUTHOR("Natsagnyam Namkhai");
+MODULE_DESCRIPTION("Out-of-tree persistent character device driver");
+MODULE_VERSION("0.3");
 
 #define DEVICE_NAME "demodev"
-#define BUF_LEN 80
+#define BUF_LEN 1024
 
-static int major;
-static struct class *demo_class;
-static struct cdev demo_cdev;
-static char msg[BUF_LEN];
-static short read_pos;
+static int major_number;
+static struct class *demodev_class = NULL;
+static struct device *demodev_device = NULL;
 
-static int dev_open(struct inode *inodep, struct file *filep) {
-    read_pos = 0;
-    try_module_get(THIS_MODULE);
+/* Persistent global storage buffer across file openings */
+static char *global_kernel_buf = NULL;
+static size_t global_datalen = 0;
+
+/* File operations: open() */
+static int demodev_open(struct inode *inodep, struct file *filep)
+{
+    pr_info("demodev: device opened successfully\n");
     return 0;
 }
 
-static ssize_t dev_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset) {
-    int bytes_read = 0;
-    if (!msg[read_pos]) return 0;
-    while (len && msg[read_pos]) {
-        put_user(msg[read_pos++], buffer++);
-        len--;
-        bytes_read++;
-    }
-    return bytes_read;
-}
-
-static ssize_t dev_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset) {
-    int i;
-    memset(msg, 0, BUF_LEN);
-    if (len > BUF_LEN - 1) len = BUF_LEN - 1;
-    for (i = 0; i < len; i++) {
-        get_user(msg[i], buffer + i);
-    }
-    msg[len] = '\0';
-    return len;
-}
-
-static int dev_release(struct inode *inodep, struct file *filep) {
-    module_put(THIS_MODULE);
+/* File operations: release() */
+static int demodev_release(struct inode *inodep, struct file *filep)
+{
+    pr_info("demodev: device closed successfully\n");
     return 0;
 }
 
-static struct file_operations fops = {
-    .owner = THIS_MODULE,
-    .open = dev_open,
-    .read = dev_read,
-    .write = dev_write,
-    .release = dev_release,
+/* File operations: read() */
+static ssize_t demodev_read(struct file *filep, char __user *buf, size_t count, loff_t *ppos)
+{
+    size_t datalen;
+    size_t not_copied;
+
+    if (*ppos >= global_datalen)
+        return 0; // End of file
+
+    datalen = global_datalen - *ppos;
+    if (count < datalen)
+        datalen = count;
+
+    not_copied = copy_to_user(buf, global_kernel_buf + *ppos, datalen);
+    if (not_copied)
+        return -EFAULT;
+
+    *ppos += datalen;
+    return datalen;
+}
+
+/* File operations: write() */
+static ssize_t demodev_write(struct file *filep, const char __user *buf, size_t count, loff_t *ppos)
+{
+    size_t not_copied;
+
+    if (count > BUF_LEN)
+        count = BUF_LEN;
+
+    *ppos = 0; // Reset offset on new write
+
+    not_copied = copy_from_user(global_kernel_buf + *ppos, buf, count);
+    if (not_copied)
+        return -EFAULT;
+
+    global_datalen = count;
+    *ppos += count;
+
+    pr_info("demodev: stored %zu bytes in kernel buffer\n", count);
+    return count;
+}
+
+/* File operations mapping */
+static const struct file_operations fops = {
+    .owner   = THIS_MODULE,
+    .open    = demodev_open,
+    .release = demodev_release,
+    .read    = demodev_read,
+    .write   = demodev_write,
 };
 
-static int __init demodev_init(void) {
-    dev_t dev_num;
-    if (alloc_chrdev_region(&dev_num, 0, 1, DEVICE_NAME) < 0) return -1;
-    major = MAJOR(dev_num);
-    cdev_init(&demo_cdev, &fops);
-    if (cdev_add(&demo_cdev, dev_num, 1) < 0) {
-        unregister_chrdev_region(dev_num, 1);
-        return -1;
+/* Module Initialization */
+static int __init demodev_init(void)
+{
+    pr_info("demodev: initializing persistent character device driver\n");
+
+    /* Allocate global persistent buffer */
+    global_kernel_buf = kzalloc(BUF_LEN, GFP_KERNEL);
+    if (!global_kernel_buf)
+        return -ENOMEM;
+
+    /* 1. Dynamically allocate major number */
+    major_number = register_chrdev(0, DEVICE_NAME, &fops);
+    if (major_number < 0) {
+        kfree(global_kernel_buf);
+        pr_err("demodev: failed to register major number\n");
+        return major_number;
     }
-    demo_class = class_create("demo_class");
-    if (IS_ERR(demo_class)) {
-        cdev_del(&demo_cdev);
-        unregister_chrdev_region(dev_num, 1);
-        return PTR_ERR(demo_class);
+
+    /* 2. Create device class */
+    demodev_class = class_create(DEVICE_NAME);
+    if (IS_ERR(demodev_class)) {
+        unregister_chrdev(major_number, DEVICE_NAME);
+        kfree(global_kernel_buf);
+        pr_err("demodev: failed to create device class\n");
+        return PTR_ERR(demodev_class);
     }
-    if (IS_ERR(device_create(demo_class, NULL, dev_num, NULL, DEVICE_NAME))) {
-        class_destroy(demo_class);
-        cdev_del(&demo_cdev);
-        unregister_chrdev_region(dev_num, 1);
-        return -1;
+
+    /* 3. Automatically create device node /dev/demodev */
+    demodev_device = device_create(demodev_class, NULL, MKDEV(major_number, 0), NULL, DEVICE_NAME);
+    if (IS_ERR(demodev_device)) {
+        class_destroy(demodev_class);
+        unregister_chrdev(major_number, DEVICE_NAME);
+        kfree(global_kernel_buf);
+        pr_err("demodev: failed to create device node\n");
+        return PTR_ERR(demodev_device);
     }
+
+    pr_info("demodev: registered successfully with major number %d\n", major_number);
     return 0;
 }
 
-static void __exit demodev_exit(void) {
-    dev_t dev_num = MKDEV(major, 0);
-    device_destroy(demo_class, dev_num);
-    class_destroy(demo_class);
-    cdev_del(&demo_cdev);
-    unregister_chrdev_region(dev_num, 1);
+/* Module Exit */
+static void __exit demodev_exit(void)
+{
+    device_destroy(demodev_class, MKDEV(major_number, 0));
+    class_destroy(demodev_class);
+    unregister_chrdev(major_number, DEVICE_NAME);
+    kfree(global_kernel_buf);
+    pr_info("demodev: module unloaded successfully\n");
 }
 
 module_init(demodev_init);
