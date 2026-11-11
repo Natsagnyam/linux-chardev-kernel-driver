@@ -1,13 +1,12 @@
 # Linux Out-of-Tree Character Device Driver (`demodev`)
 
 A robust, production-grade Linux character device driver developed for ARM Cortex-A8 (BeagleBone Black) running Debian, designed from first principles for Canonical Linux Kernel Engineering standards.
-CLI terminal spin-lock-test result:
+CLI terminal ioctl_kernel-driver-test result:
 ![Result](jpeg/test_ioctl_kernel-driver.png)
 
 ![ioctl](jpeg/ioctl_kernel_driver.png)
 
 ---
-cat << 'EOF' > README.md
 # Linux Out-of-Tree Character Device Driver (`demodev`)
 
 A robust, production-grade Linux character device driver developed for ARM Cortex-A8 (BeagleBone Black) running Debian, designed from first principles for Canonical Linux Kernel Engineering standards.
@@ -68,7 +67,8 @@ Remove the module when testing is complete:
 
 Bash
 sudo rmmod demodev
-dmesg | tail -n 5
+dmesg | tail -n 
+
 Author
 Natsagnyam Namkhai
 
