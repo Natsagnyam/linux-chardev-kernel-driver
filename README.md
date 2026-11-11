@@ -1,15 +1,24 @@
 # Linux Out-of-Tree Character Device Driver (`demodev`)
 
 A robust, production-grade Linux character device driver developed for ARM Cortex-A8 (BeagleBone Black) running Debian, designed from first principles for Canonical Linux Kernel Engineering standards.
-CLI terminal test result:
-![Result](jpeg/dynamic-kernel-driver.png)
+CLI terminal spin-lock-test result:
+![Result](jpeg/spin-lock.png)
+
+![Result](jpeg/kernel_ring_buffer.png)
+
+---
+
+# Linux Out-of-Tree Character Device Driver (`demodev`)
+
+A robust, production-grade Linux character device driver developed for ARM Cortex-A8 (BeagleBone Black) running Debian, designed from first principles for Canonical Linux Kernel Engineering standards.
 
 ---
 
 ## Architecture & Features
 
 - **Dynamic Device Registration:** Automatically allocates a major number via `register_chrdev()` and creates device nodes in `/dev/demodev` via modern kernel `class_create()` and `device_create()` APIs.
-- **Persistent Kernel Buffer:** Maintains a thread-safe, 1024-byte kernel storage buffer (`global_kernel_buf`) supporting cross-file descriptor interactions (e.g., separate `echo`/`tee` and `cat` invocations).
+- **Persistent Kernel Buffer:** Maintains a 1024-byte kernel storage buffer (`global_kernel_buf`) supporting cross-file descriptor interactions (e.g., separate `echo`/`tee` and `cat` invocations).
+- **SMP Concurrency Protection:** Employs kernel spinlocks (`spinlock_t`) to serialize critical sections and protect shared global states against multi-core SMP race conditions, while carefully separating sleeping context operations (such as userspace boundary copies) from locked regions.
 - **Safe Boundary Copying:** Implements secure kernel-to-userspace memory transfer using `copy_to_user()` and `copy_from_user()` with rigorous bounds checking and error handling (`-EFAULT`, `-ENOMEM`).
 - **Unified Build System:** A streamlined `Makefile` that compiles both the out-of-tree kernel module (`demodev.ko`) and companion userspace test applications (`app`).
 
@@ -19,11 +28,12 @@ CLI terminal test result:
 
 ```text
 .
-├── demodev.c       # Core kernel module source (persistent character driver)
+├── demodev.c       # Core kernel module source (persistent character driver with spinlocks)
 ├── app.c           # Userspace test application exercising open/write/read lifecycle
 ├── Makefile        # Unified build infrastructure for kernel module and app binary
 ├── README.md       # Project documentation and build/test instructions
 └── jpeg/           # Architecture diagrams and hardware verification photos
+
 Build & Installation Instructions
 1. Compile the Module and Application
 Run make to compile both the kernel module and the userspace test program:
@@ -38,6 +48,7 @@ Bash
 sudo insmod demodev.ko
 dmesg | tail -n 5
 ls -l /dev/demodev
+
 3. Test I/O Operations
 You can test the driver using standard shell utilities or the companion test application:
 

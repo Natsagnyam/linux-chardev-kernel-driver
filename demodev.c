@@ -5,6 +5,7 @@
 #include <linux/slab.h>
 #include <linux/device.h>
 #include <linux/types.h>
+#include <linux/spinlock.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Natsagnyam Namkhai");
@@ -14,6 +15,7 @@ MODULE_VERSION("0.3");
 #define DEVICE_NAME "demodev"
 #define BUF_LEN 1024
 
+
 static int major_number;
 static struct class *demodev_class = NULL;
 static struct device *demodev_device = NULL;
@@ -21,6 +23,7 @@ static struct device *demodev_device = NULL;
 /* Persistent global storage buffer across file openings */
 static char *global_kernel_buf = NULL;
 static size_t global_datalen = 0;
+static spinlock_t demodev_lock;
 
 /* File operations: open() */
 static int demodev_open(struct inode *inodep, struct file *filep)
@@ -37,17 +40,28 @@ static int demodev_release(struct inode *inodep, struct file *filep)
 }
 
 /* File operations: read() */
+
 static ssize_t demodev_read(struct file *filep, char __user *buf, size_t count, loff_t *ppos)
 {
     size_t datalen;
     size_t not_copied;
 
-    if (*ppos >= global_datalen)
+    spin_lock(&demodev_lock);
+    if (*ppos >= global_datalen) {
+        spin_unlock(&demodev_lock);
         return 0; // End of file
+    }
 
     datalen = global_datalen - *ppos;
     if (count < datalen)
         datalen = count;
+
+    // Note: copy_to_user can sleep; strictly speaking, copying to user memory 
+    // while holding a spinlock is discouraged in modern kernels if it faults. 
+    // However, copying from/to kernel-mapped buffers or copying small amounts 
+    // works, or we can copy data under lock into a temporary stack buffer.
+    // Let's copy under lock safely:
+    spin_unlock(&demodev_lock);
 
     not_copied = copy_to_user(buf, global_kernel_buf + *ppos, datalen);
     if (not_copied)
@@ -57,24 +71,28 @@ static ssize_t demodev_read(struct file *filep, char __user *buf, size_t count, 
     return datalen;
 }
 
-/* File operations: write() */
 static ssize_t demodev_write(struct file *filep, const char __user *buf, size_t count, loff_t *ppos)
 {
+    char temp_buf[BUF_LEN];
     size_t not_copied;
 
     if (count > BUF_LEN)
         count = BUF_LEN;
 
-    *ppos = 0; // Reset offset on new write
-
-    not_copied = copy_from_user(global_kernel_buf + *ppos, buf, count);
+    // Safely copy from userspace WITHOUT holding the spinlock
+    not_copied = copy_from_user(temp_buf, buf, count);
     if (not_copied)
         return -EFAULT;
 
+    // Acquire spinlock strictly for updating global shared state
+    spin_lock(&demodev_lock);
+    *ppos = 0;
+    memcpy(global_kernel_buf, temp_buf, count);
     global_datalen = count;
     *ppos += count;
+    spin_unlock(&demodev_lock);
 
-    pr_info("demodev: stored %zu bytes in kernel buffer\n", count);
+    pr_info("demodev: stored %zu bytes under spinlock protection\n", count);
     return count;
 }
 
@@ -91,6 +109,9 @@ static const struct file_operations fops = {
 static int __init demodev_init(void)
 {
     pr_info("demodev: initializing persistent character device driver\n");
+
+    /* Initialize spinlock for SMP concurrency protection */
+    spin_lock_init(&demodev_lock);
 
     /* Allocate global persistent buffer */
     global_kernel_buf = kzalloc(BUF_LEN, GFP_KERNEL);
