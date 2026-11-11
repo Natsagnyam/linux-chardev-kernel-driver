@@ -1,6 +1,8 @@
 # Linux Out-of-Tree Character Device Driver (`demodev`)
 
 A robust, production-grade Linux character device driver developed for ARM Cortex-A8 (BeagleBone Black) running Debian, designed from first principles for Canonical Linux Kernel Engineering standards.
+CLI terminal test result:
+![Result](jpeg/dynamic-kernel-driver.png)
 
 ---
 
@@ -58,3 +60,5 @@ Author
 Natsagnyam Namkhai
 
 Target Role: Linux Kernel Engineer, Canonical
+
+
