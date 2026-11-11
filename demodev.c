@@ -5,13 +5,13 @@
 #include <linux/slab.h>
 #include <linux/device.h>
 #include <linux/types.h>
-#include <linux/spinlock.h>
+#include <linux/mutex.h>
 #include <linux/ioctl.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Natsagnyam Namkhai");
-MODULE_DESCRIPTION("Out-of-tree persistent character device driver with spinlocks and ioctl");
-MODULE_VERSION("0.4");
+MODULE_DESCRIPTION("Out-of-tree persistent character device driver with mutex synchronization and ioctl");
+MODULE_VERSION("0.5");
 
 #define DEVICE_NAME "demodev"
 #define BUF_LEN 1024
@@ -32,10 +32,10 @@ static int major_number;
 static struct class *demodev_class = NULL;
 static struct device *demodev_device = NULL;
 
-/* Persistent global storage buffer and concurrency control */
+/* Persistent global storage buffer and mutex concurrency control */
 static char *global_kernel_buf = NULL;
 static size_t global_datalen = 0;
-static spinlock_t demodev_lock;
+static struct mutex demodev_mutex;
 
 /* Driver statistics counters */
 static unsigned long total_writes = 0;
@@ -61,9 +61,11 @@ static ssize_t demodev_read(struct file *filep, char __user *buf, size_t count, 
     size_t datalen;
     size_t not_copied;
 
-    spin_lock(&demodev_lock);
+    if (mutex_lock_interruptible(&demodev_mutex))
+        return -ERESTARTSYS;
+
     if (*ppos >= global_datalen) {
-        spin_unlock(&demodev_lock);
+        mutex_unlock(&demodev_mutex);
         return 0; // End of file
     }
 
@@ -71,42 +73,45 @@ static ssize_t demodev_read(struct file *filep, char __user *buf, size_t count, 
     if (count < datalen)
         datalen = count;
 
-    spin_unlock(&demodev_lock);
-
+    // Mutex allows safe sleeping during copy_to_user if page faults occur
     not_copied = copy_to_user(buf, global_kernel_buf + *ppos, datalen);
-    if (not_copied)
+    if (not_copied) {
+        mutex_unlock(&demodev_mutex);
         return -EFAULT;
+    }
 
-    spin_lock(&demodev_lock);
     *ppos += datalen;
     total_reads++;
-    spin_unlock(&demodev_lock);
-
+    
+    mutex_unlock(&demodev_mutex);
     return datalen;
 }
 
 /* File operations: write() */
 static ssize_t demodev_write(struct file *filep, const char __user *buf, size_t count, loff_t *ppos)
 {
-    char temp_buf[BUF_LEN];
     size_t not_copied;
 
     if (count > BUF_LEN)
         count = BUF_LEN;
 
-    not_copied = copy_from_user(temp_buf, buf, count);
-    if (not_copied)
-        return -EFAULT;
+    if (mutex_lock_interruptible(&demodev_mutex))
+        return -ERESTARTSYS;
 
-    spin_lock(&demodev_lock);
     *ppos = 0; // Reset offset on new write
-    memcpy(global_kernel_buf, temp_buf, count);
+    not_copied = copy_from_user(global_kernel_buf, buf, count);
+    if (not_copied) {
+        mutex_unlock(&demodev_mutex);
+        return -EFAULT;
+    }
+
     global_datalen = count;
     *ppos += count;
     total_writes++;
-    spin_unlock(&demodev_lock);
 
-    pr_info("demodev: stored %zu bytes under spinlock protection\n", count);
+    mutex_unlock(&demodev_mutex);
+
+    pr_info("demodev: stored %zu bytes under mutex protection\n", count);
     return count;
 }
 
@@ -116,33 +121,36 @@ static long demodev_ioctl(struct file *filep, unsigned int cmd, unsigned long ar
     if (_IOC_TYPE(cmd) != DEMODEV_IOC_MAGIC)
         return -ENOTTY;
 
+    if (mutex_lock_interruptible(&demodev_mutex))
+        return -ERESTARTSYS;
+
     switch (cmd) {
     case DEMODEV_IOC_RESET:
-        spin_lock(&demodev_lock);
         global_datalen = 0;
         memset(global_kernel_buf, 0, BUF_LEN);
-        spin_unlock(&demodev_lock);
         pr_info("demodev: buffer reset via ioctl\n");
         break;
 
     case DEMODEV_IOC_GET_STATS: {
         struct demodev_stats stats;
 
-        spin_lock(&demodev_lock);
         stats.write_count = total_writes;
         stats.read_count = total_reads;
         stats.current_len = global_datalen;
-        spin_unlock(&demodev_lock);
 
-        if (copy_to_user((struct demodev_stats __user *)arg, &stats, sizeof(stats)))
+        if (copy_to_user((struct demodev_stats __user *)arg, &stats, sizeof(stats))) {
+            mutex_unlock(&demodev_mutex);
             return -EFAULT;
+        }
         break;
     }
 
     default:
+        mutex_unlock(&demodev_mutex);
         return -ENOTTY;
     }
 
+    mutex_unlock(&demodev_mutex);
     return 0;
 }
 
@@ -159,9 +167,9 @@ static const struct file_operations fops = {
 /* Module Initialization */
 static int __init demodev_init(void)
 {
-    pr_info("demodev: initializing persistent character device driver with ioctl\n");
+    pr_info("demodev: initializing persistent character device driver with mutex\n");
 
-    spin_lock_init(&demodev_lock);
+    mutex_init(&demodev_mutex);
 
     global_kernel_buf = kzalloc(BUF_LEN, GFP_KERNEL);
     if (!global_kernel_buf)
