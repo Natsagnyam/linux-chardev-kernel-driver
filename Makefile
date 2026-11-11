@@ -1,17 +1,16 @@
 obj-m += demodev.o
 
-# Current running kernel build directory
-KDIR ?= /lib/modules/$(shell uname -r)/build
-PWD := $(shell pwd)
-
-all: module app
+all: module app stress_app
 
 module:
-	$(MAKE) -C $(KDIR) M=$(PWD) modules
+	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
 
 app: app.c
 	gcc app.c -o app
 
+stress_app: stress_app.c
+	gcc -pthread stress_app.c -o stress_app
+
 clean:
-	$(MAKE) -C $(KDIR) M=$(PWD) clean
-	rm -f app
+	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+	rm -f app stress_app
